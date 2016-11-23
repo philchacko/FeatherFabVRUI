@@ -1,0 +1,284 @@
+// Fill out your copyright notice in the Description page of Project Settings.
+
+#include "KittyHawk.h"
+
+/* VR Includes */
+#include "HeadMountedDisplay.h"
+#include "MotionControllerComponent.h"
+#include "stdio.h"
+#include "VRCharacter.h"
+#define WNT
+#define WNT_WINDOW
+#include "BRepPrimAPI_MakeBox.hxx"
+
+
+// Sets default values
+AVRCharacter::AVRCharacter()
+{
+ 	// Set this character to call Tick() every frame.  You can turn this off to improve performance if you don't need it.
+	PrimaryActorTick.bCanEverTick = true;
+
+	VROriginComp = CreateDefaultSubobject<USceneComponent>(TEXT("VRCameraOrigin"));
+	VROriginComp->AttachParent = RootComponent;
+
+	CameraComp = CreateDefaultSubobject<UCameraComponent>(TEXT("CameraComponent"));
+	/* Assign to the VR origin component so any reset calls to the HMD can reset to 0,0,0 relative to this component */
+	CameraComp->AttachParent = VROriginComp;
+
+	LeftHandComponent = CreateDefaultSubobject<UMotionControllerComponent>(TEXT("LeftHand"));
+	LeftHandComponent->Hand = EControllerHand::Left;
+	LeftHandComponent->AttachParent = VROriginComp;
+
+	RightHandComponent = CreateDefaultSubobject<UMotionControllerComponent>(TEXT("RightHand"));
+	RightHandComponent->Hand = EControllerHand::Right;
+	RightHandComponent->AttachParent = VROriginComp;
+
+	bPositionalHeadTracking = false;
+	TArray<AMyActor> Objects;
+}
+
+// Called when the game starts or when spawned
+void AVRCharacter::BeginPlay()
+{
+	Super::BeginPlay();
+	
+	SetupVROptions();
+
+	AllocConsole();
+	freopen("conin$", "r", stdin);
+	freopen("conout$", "w", stdout);
+	freopen("conout$", "w", stderr);
+}
+
+void AVRCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	Super::EndPlay(EndPlayReason);
+
+	FreeConsole();
+}
+
+void AVRCharacter::Tick(float DeltaTime)
+{
+	Super::Tick(DeltaTime);
+
+	if (bIsDestroyingPart) {
+		int32 objCount = Objects.Num();
+		for (int32 i = objCount - 1; i >= 0; i--) {
+			if (Objects[i]->bPartIsWithinRange) {
+				Objects[i]->DeletePart();
+				Objects.RemoveAtSwap(i);
+			}
+		}
+	}
+
+	float fDistance;
+	int32 iClosest = -1;
+	int32 objCount = Objects.Num();
+
+	if (bIsResizingObj || bIsMovingObj) {
+		for (int32 j = objCount - 1; j >= 0; j--) {
+			if (Objects[j]->bPartIsWithinRange) {
+				if (iClosest < 0) {
+					iClosest = j;
+					fDistance = (RightHandComponent->GetComponentLocation() - Objects[j]->GetActorLocation()).Size();
+				}
+				else {
+					if ((RightHandComponent->GetComponentLocation() - Objects[j]->GetActorLocation()).Size() < fDistance) {
+						iClosest = j;
+						fDistance = (RightHandComponent->GetComponentLocation() - Objects[j]->GetActorLocation()).Size();
+					}
+				}
+			}
+		}
+	}
+
+	if (bIsResizingObj) {
+		FVector fvNewScale = FVector(0.1f, 0.1f, 0.1f);
+		FVector fvActorLoc;
+		FVector fvRightHandLoc;
+		//float fActorStartScale;
+		//float fMaxScale;
+		if (iClosest >= 0) {
+			fvActorLoc = Objects[iClosest]->GetActorLocation();
+			fvRightHandLoc = RightHandComponent->GetComponentLocation();
+			float newMagnitude = (fvRightHandLoc - fvActorLoc).Size() * 2; // Convert radius to diameter
+			//fActorStartScale = Objects[iClosest]->fActorScale;
+			//fvNewScale = fActorStartScale * (RightHandComponent->GetComponentLocation() - fvActorLoc) / (fvResizeStartLoc - fvActorLoc);
+			//fMaxScale = fvNewScale.GetAbsMax();
+			fvNewScale.X = newMagnitude*.01f;
+			fvNewScale.Y = newMagnitude*.01f;
+			fvNewScale.Z = newMagnitude*.01f;
+			Objects[iClosest]->SetActorScale3D(fvNewScale);
+		}
+	}
+	else {
+		int32 objCount = Objects.Num();
+		for (int32 i = objCount - 1; i >= 0; i--) {
+			if (Objects[i]->bPartIsWithinRange) {
+				Objects[i]->fActorScale = Objects[i]->GetActorScale().X;
+			}
+		}
+	}
+
+	if (bIsMovingObj) {
+		int32 objCount = Objects.Num();
+		FVector fvMoveDelta = RightHandComponent->GetComponentLocation() - fvMoveLastLoc;
+		if (iClosest >= 0) {
+			FVector fvNewLoc = Objects[iClosest]->GetActorLocation() + fvMoveDelta;
+			Objects[iClosest]->SetActorLocation(fvNewLoc);
+		}
+		fvMoveLastLoc = RightHandComponent->GetComponentLocation();
+	}
+
+	/*if (MyController != NULL) // Nullcheck motion controller
+	{
+	if (MyController->bIsDestroyingPart && bPartIsWithinRange)
+	{
+	DeletePart();
+	}
+	}*/
+}
+
+// Called to bind functionality to input
+void AVRCharacter::SetupPlayerInputComponent(class UInputComponent* InputComponent)
+{
+	Super::SetupPlayerInputComponent(InputComponent);
+
+	InputComponent->BindAction("ToggleTrackingSpace", IE_Pressed, this, &AVRCharacter::ToggleTrackingSpace);
+	InputComponent->BindAction("ResetHMDOrigin", IE_Pressed, this, &AVRCharacter::ResetHMDOrigin);
+	InputComponent->BindAction("SpawnObject", IE_Pressed, this, &AVRCharacter::SpawnObject);
+	InputComponent->BindAction("DeleteObject", IE_Pressed, this, &AVRCharacter::BeginDestroyPart);
+	InputComponent->BindAction("DeleteObject", IE_Released, this, &AVRCharacter::EndDestroyPart);
+	InputComponent->BindAction("PrintToCSV", IE_Pressed, this, &AVRCharacter::PrintToCSV);
+	InputComponent->BindAction("ResizeObject", IE_Pressed, this, &AVRCharacter::BeginResizeObj);
+	InputComponent->BindAction("ResizeObject", IE_Released, this, &AVRCharacter::EndResizeObj);
+	InputComponent->BindAction("MoveObject", IE_Pressed, this, &AVRCharacter::BeginMoveObj);
+	InputComponent->BindAction("MoveObject", IE_Released, this, &AVRCharacter::EndMoveObj);
+}
+
+void AVRCharacter::SetupVROptions()
+{
+	IHeadMountedDisplay* HMD = (IHeadMountedDisplay*)(GEngine->HMDDevice.Get());
+	if (HMD && HMD->IsStereoEnabled())
+	{
+		/* Disable/Enable positional movement to pin camera translation */
+		HMD->EnablePositionalTracking(bPositionalHeadTracking);
+
+		/* Remove any translation when disabling positional head tracking */
+		if (!bPositionalHeadTracking)
+		{
+			CameraComp->SetRelativeLocation(FVector(0, 0, 0));
+		}
+	}
+}
+
+
+void AVRCharacter::ResetHMDOrigin()
+{
+	IHeadMountedDisplay* HMD = (IHeadMountedDisplay*)(GEngine->HMDDevice.Get());
+	if (HMD && HMD->IsStereoEnabled())
+	{
+		HMD->ResetOrientationAndPosition();
+	}
+}
+
+
+void AVRCharacter::ToggleTrackingSpace()
+{
+	// TODO: Fix module includes for SteamVR
+
+	//@todo Make this safe once we can add something to the DeviceType enum.  For now, make the terrible assumption this is a SteamVR device.
+// 	FSteamVRHMD* SteamVRHMD = (FSteamVRHMD*)(GEngine->HMDDevice.Get());
+// 	if (SteamVRHMD && SteamVRHMD->IsStereoEnabled())
+// 	{
+// 		ESteamVRTrackingSpace TrackingSpace = SteamVRHMD->GetTrackingSpace();
+// 		SteamVRHMD->SetTrackingSpace(TrackingSpace == ESteamVRTrackingSpace::Seated ? ESteamVRTrackingSpace::Standing : ESteamVRTrackingSpace::Seated);
+// 	}
+}
+
+void AVRCharacter::SpawnObject()
+{
+	// TODO: Fix module includes for SteamVR
+
+	printf("Try spawn.\n");
+
+	FVector RHandLoc = RightHandComponent->GetComponentLocation();
+	/*RHandLoc.X = 0.0f;
+	RHandLoc.Y = 0.0f;
+	RHandLoc.Z = 10.0f;*/
+
+	//FTransform RHandTform = RightHandComponent->GetComponentTransform();
+	FActorSpawnParameters ourSpawnParams;
+	ourSpawnParams.Owner = this;
+	ourSpawnParams.Instigator = Instigator;
+
+	//AMyActor* SpawnedSphere = GetWorld()->SpawnActor<AMyActor>(ourSpawningObject, RHandLoc, FRotator::ZeroRotator, ourSpawnParams);
+	//Objects.Add(SpawnedSphere);
+	Objects.Emplace(GetWorld()->SpawnActor<AMyActor>(ourSpawningObject, RHandLoc, FRotator::ZeroRotator, ourSpawnParams));
+	int32 objCount = Objects.Num();
+	if (objCount > 0) {
+		FVector fNewScale;
+		fNewScale.X = 0.1f;
+		fNewScale.Y = 0.1f;
+		fNewScale.Z = 0.1f;
+		Objects[objCount - 1]->SetActorScale3D(fNewScale);
+		Objects[objCount - 1]->fActorScale = 0.1f;
+	}
+}
+
+void AVRCharacter::BeginDestroyPart()
+{
+	//printf("Begin destroy part.\n");
+	bIsDestroyingPart = true;
+}
+void AVRCharacter::EndDestroyPart()
+{
+	//printf("End destroy part.\n");
+	bIsDestroyingPart = false;
+}
+
+void AVRCharacter::BeginResizeObj()
+{
+	//printf("Begin resize.\n");
+	bIsResizingObj = true;
+	fvResizeStartLoc = RightHandComponent->GetComponentLocation();
+}
+void AVRCharacter::EndResizeObj()
+{
+	//printf("End resize.\n");
+	bIsResizingObj = false;
+}
+
+void AVRCharacter::BeginMoveObj()
+{
+	printf("Begin move.\n");
+	bIsMovingObj = true;
+	fvMoveLastLoc = RightHandComponent->GetComponentLocation();
+}
+void AVRCharacter::EndMoveObj()
+{
+	printf("End resize.\n");
+	bIsMovingObj = false;
+}
+
+void AVRCharacter::PrintToCSV()
+{
+	printf("Print to CSV.\n");
+	/*FILE* pFile;
+	pFile = fopen("C:\\Users\\philc\\OneDrive\\Documents\\Unreal Projects\\KittyHawk\\ExportParams.csv", "w");
+
+	int32 objCount = Objects.Num();
+	for (int32 i = 0; i < objCount; i++) {
+		FVector objLoc = Objects[i]->GetActorLocation();
+		float objDiam = Objects[i]->fActorScale * 100.0f;
+		fprintf(pFile, "sphere,");
+		fprintf(pFile, "%0.3f,", objDiam);
+		fprintf(pFile, "%0.3f,", objLoc.X);
+		fprintf(pFile, "%0.3f,", objLoc.Y);
+		fprintf(pFile, "%0.3f", objLoc.Z);
+		fprintf(pFile, "\n");
+	}
+
+	fclose(pFile);*/
+}
+

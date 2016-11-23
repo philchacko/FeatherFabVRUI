@@ -1,0 +1,63 @@
+// Fill out your copyright notice in the Description page of Project Settings.
+
+using UnrealBuildTool;
+
+public class KittyHawk : ModuleRules
+{
+	public KittyHawk(TargetInfo Target)
+	{
+		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore" });
+
+        /* VR Required Modules */ 
+		PrivateDependencyModuleNames.AddRange(new string[] { "HeadMountedDisplay" });
+
+        // OCCT include path
+        PrivateIncludePaths.Add("C:/OCCT-vc12-64/inc");
+
+        // OCCT lib path
+        string LibPath;
+        bool isdebug = Target.Configuration == UnrealTargetConfiguration.Debug && BuildConfiguration.bDebugBuildsActuallyUseDebugCRT;
+        if (Target.Platform == UnrealTargetPlatform.Win64)
+        {
+            LibPath = "C:/OCCT-vc12-64/win64/vc12/lib";
+            PublicLibraryPaths.Add(LibPath);
+            PublicAdditionalLibraries.Add("TKOpenGl.lib");
+            PublicAdditionalLibraries.Add("TKernel.lib");
+            PublicAdditionalLibraries.Add("TKGeomBase.lib");
+            PublicAdditionalLibraries.Add("TKTopAlgo.lib");
+            PublicAdditionalLibraries.Add("TKOffset.lib");
+            PublicAdditionalLibraries.Add("TKBool.lib");
+            PublicAdditionalLibraries.Add("TKPrim.lib");
+            PublicAdditionalLibraries.Add("TKFillet.lib");
+            PublicAdditionalLibraries.Add("TKMath.lib");
+            PublicAdditionalLibraries.Add("TKService.lib");
+            PublicAdditionalLibraries.Add("TKV3d.lib");
+            PublicAdditionalLibraries.Add("TKBrep.lib");
+            PublicAdditionalLibraries.Add("TKIGES.lib");
+            PublicAdditionalLibraries.Add("PTKernel.lib");
+            PublicAdditionalLibraries.Add("TKSTL.lib");
+            PublicAdditionalLibraries.Add("TKVRML.lib");
+            PublicAdditionalLibraries.Add("TKSTEP.lib");
+            PublicAdditionalLibraries.Add("TKShapeSchema.lib");
+            PublicAdditionalLibraries.Add("TKG3d.lib");
+            PublicAdditionalLibraries.Add("TKG2d.lib");
+            PublicAdditionalLibraries.Add("TKXSBase.lib");
+            PublicAdditionalLibraries.Add("TKPShape.lib");
+            PublicAdditionalLibraries.Add("TKShHealing.lib");
+            PublicAdditionalLibraries.Add("TKBO.lib");
+        }
+
+        // Uncomment if you are using Slate UI
+        // PrivateDependencyModuleNames.AddRange(new string[] { "Slate", "SlateCore" });
+
+        // Uncomment if you are using online features
+        // PrivateDependencyModuleNames.Add("OnlineSubsystem");
+        // if ((Target.Platform == UnrealTargetPlatform.Win32) || (Target.Platform == UnrealTargetPlatform.Win64))
+        // {
+        //		if (UEBuildConfiguration.bCompileSteamOSS == true)
+        //		{
+        //			DynamicallyLoadedModuleNames.Add("OnlineSubsystemSteam");
+        //		}
+        // }
+    }
+}
